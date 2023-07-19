@@ -13,58 +13,68 @@ const transporter = nodemailer.createTransport({
 
 
 const signUp = async (req, res) => {
-  const { name, email, password } = req.body
+  const { name, email, password } = req.body;
 
-  //confirm data:
+  // Confirm data
   if (!email || !password || !name) {
-    res.status(400).json({ message: 'All fields are required' })
+    return res.status(400).json({ message: 'All fields are required' });
   }
 
-  //check for duplicates:
-  const duplicate = await users.findOne({ email }).collation({ locale: 'en', strength: 2 }).lean().exec();
+  // Check for duplicates
+  const duplicate = await users.findOne({ email }).lean().exec();
   if (duplicate) {
-    res.status(409).json({ message: 'Email Already Exists!!' })
+    return res.status(409).json({ message: 'Email Already Exists!!' });
   }
 
-  //hash password:
-  const hashPwd = await bcrypt.hash(password, 10) //salt rounds
+  // Hash password
+  const hashPwd = await bcrypt.hash(password, 10); // Salt rounds
   const OTP = Math.floor(100000 + Math.random() * 900000);
 
   const mailOptions = {
     from: process.env.GMAIL_USER,
     to: email,
     subject: "6 Digit code to verify your email Address from VenQ",
-    text: `OTP: ${OTP}`
-  }
-  transporter.sendMail(mailOptions, (error, info) => {
+    text: `OTP: ${OTP}`,
+  };
+
+  transporter.sendMail(mailOptions, async (error, info) => {
     if (error) {
-      res.status(400).json({ message: "Email not sent!!!" })
+      return res.status(400).json({ message: "Email not sent!!!" });
     } else {
-      res.status(200).json({ message: "Email sent successfully!!!" })
-    }
-  })
+      // Store OTP and its expiration time in the user document
+      const expirationTime = new Date().getTime() + 3 * 60 * 1000; // 3 minutes
+      const userObject = {
+        name,
+        password: hashPwd,
+        email,
+        otp: { code: OTP, expiresAt: expirationTime },
+      };
+      // Create and store new user
+      const user = await users.create(userObject);
+      const accessToken = jwt.sign(
+        {
+          UserInfo: {
+            email,
+            name,
+          },
+        },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: '15m' }
+      );
 
-  const userObject = { name, "password": hashPwd, email, "otp": OTP }
-  //create and store new user:
-  const user = await users.create(userObject);
-
-  const accessToken = jwt.sign(
-    {
-      "UserInfo": {
-        "email": email,
-        "name": name
+      if (user) {
+        return res
+          .status(201)
+          .json({ message: user, token: accessToken });
+      } else {
+        return res
+          .status(400)
+          .json({ message: 'Invalid user data received' });
       }
-    },
-    process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: '15m' }
-  )
-
-  if (user) {//created
-    res.status(201).json({ message: user, token: accessToken })
-  } else {
-    res.status(400).json({ message: 'Invalid user data received' })
-  }
+    }
+  });
 }
+
 
 const verifyEmail = async (req, res) => {
   const { email, otp } = req.body;
@@ -74,27 +84,72 @@ const verifyEmail = async (req, res) => {
   }
 
   try {
-    const existingUser = await users.findOne({ email: email }).exec();
+    const existingUser = await users.findOne({ email }).exec();
 
     if (!existingUser) {
       return res.status(400).json({ message: 'User does not exist!!' });
     }
 
-    if (existingUser.otp !== otp) {
+    const { code, expiresAt } = existingUser.otp;
+
+    if (code !== otp) {
       return res.status(400).json({ message: 'Incorrect OTP!!' });
     }
 
-    const updatedUser = await users.updateOne(
-      { email: email },
-      { $set: { isVerified: true, otp: null } }
-    );
-    return res.status(200).json({ message: 'Account verified successfully!!!', details: updatedUser });
+    if (new Date().getTime() > expiresAt) {
+      return res.status(400).json({ message: 'OTP has expired!!' });
+    }
 
+    const updatedUser = await users.updateOne(
+      { email },
+      { $set: { isVerified: true, otp: { code: null, expiresAt: null } } }
+    );
+
+    return res
+      .status(200)
+      .json({ message: 'Account verified successfully!!!', details: updatedUser });
   } catch (error) {
     return res.status(500).json({ message: 'Something went wrong' });
   }
 }
 
+
+const resendOTP = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // Generate a new OTP
+    const newOTP = Math.floor(100000 + Math.random() * 900000);
+
+    // Update the existing user document with the new OTP and expiration time
+    const expirationTime = new Date().getTime() + 3 * 60 * 1000; // 3 minutes
+    const updatedUser = await users.findOneAndUpdate(
+      { email },
+      { $set: { otp: { code: newOTP, expiresAt: expirationTime } } }
+    );
+
+    if (!updatedUser) {
+      return res.status(400).json({ message: 'User not found' });
+    }
+
+    // Send the new OTP to the user's email address
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: email,
+      subject: "New 6 Digit code to verify your email Address from VenQ",
+      text: `New OTP: ${newOTP}`,
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        return res.status(400).json({ message: "Email not sent!!!" });
+      }
+      return res.status(200).json({ message: 'OTP resent successfully!' });
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Something went wrong' });
+  }
+}
 
 
 const signOut = async (req, res) => {
@@ -113,12 +168,11 @@ const signOut = async (req, res) => {
       { $set: { isLoggedIn: false } }
     );
 
-    res.json({ message: 'Successfully logged out', user: updatedUser });
+    res.json({ message: 'Successfully logged out' });
   } catch (error) {
     return res.status(500).json({ message: 'Something went wrong' });
   }
 }
-
 
 
 const login = async (req, res) => {
@@ -154,4 +208,4 @@ const login = async (req, res) => {
 }
 
 
-module.exports = { signUp, verifyEmail, login, signOut }
+module.exports = { signUp, verifyEmail, login, signOut, resendOTP }
