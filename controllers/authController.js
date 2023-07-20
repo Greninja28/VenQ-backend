@@ -35,7 +35,7 @@ const signUp = async (req, res) => {
     to: email,
     subject: "6 Digit code to verify your email Address from VenQ",
     text: `OTP: ${OTP}`,
-  };
+  }
 
   transporter.sendMail(mailOptions, async (error, info) => {
     if (error) {
@@ -79,37 +79,40 @@ const signUp = async (req, res) => {
 const verifyEmail = async (req, res) => {
   const { email, otp } = req.body;
 
-  if (!otp) {
-    return res.status(400).json({ message: 'Enter the OTP!!!' });
+  if (!email || !otp) {
+    return res.status(400).json({ message: 'Please provide both email and OTP.' });
   }
 
   try {
-    const existingUser = await users.findOne({ email }).exec();
+    const existingUser = await users.findOne({ email });
 
     if (!existingUser) {
-      return res.status(400).json({ message: 'User does not exist!!' });
+      return res.status(400).json({ message: 'User does not exist.' });
     }
 
     const { code, expiresAt } = existingUser.otp;
 
     if (code !== otp) {
-      return res.status(400).json({ message: 'Incorrect OTP!!' });
+      return res.status(400).json({ message: 'Incorrect OTP.' });
     }
 
-    if (new Date().getTime() > expiresAt) {
-      return res.status(400).json({ message: 'OTP has expired!!' });
+    if (Date.now() > expiresAt) {
+      await users.updateOne(
+        { email },
+        { $set: { otp: { code: null, expiresAt: null } } }
+      );
+      return res.status(400).json({ message: 'OTP has expired.' });
     }
 
-    const updatedUser = await users.updateOne(
+    await users.updateOne(
       { email },
       { $set: { isVerified: true, otp: { code: null, expiresAt: null } } }
     );
 
-    return res
-      .status(200)
-      .json({ message: 'Account verified successfully!!!', details: updatedUser });
+    return res.status(200).json({ message: 'Account verified successfully.' });
   } catch (error) {
-    return res.status(500).json({ message: 'Something went wrong' });
+    console.error(error);
+    return res.status(500).json({ message: 'Something went wrong.' });
   }
 }
 
@@ -118,6 +121,7 @@ const resendOTP = async (req, res) => {
   const { email } = req.body;
 
   try {
+
     // Generate a new OTP
     const newOTP = Math.floor(100000 + Math.random() * 900000);
 
