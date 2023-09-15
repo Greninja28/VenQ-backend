@@ -17,13 +17,10 @@ git clone https://github.com/Greninja28/VenQ-backend.git
 npm install
 
 # Create a .env file and populate it with your environment variables, including:
-MONGODB_URI=
-
-GMAIL_USER=
-
-GMAIL_PASS=
-
-ACCESS_TOKEN_SECRET=
+1. MONGODB_URI=
+2. GMAIL_USER=
+3. GMAIL_PASS=
+4. ACCESS_TOKEN_SECRET=
 
 # Start the server:
 npm start
