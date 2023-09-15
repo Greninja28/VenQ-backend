@@ -18,8 +18,11 @@ npm install
 
 # Create a .env file and populate it with your environment variables, including:
 MONGODB_URI=
+
 GMAIL_USER=
+
 GMAIL_PASS=
+
 ACCESS_TOKEN_SECRET=
 
 # Start the server:
